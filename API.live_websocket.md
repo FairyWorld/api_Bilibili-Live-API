@@ -162,9 +162,63 @@ wss://{host}:{wss_port}/sub
 | `RING_STATUS_CHANGE_V2` | 响铃 V2。 |
 | `PLAY_TOGETHER_ICON_CHANGE` | 一起玩图标。 |
 
+## 关键事件 data 结构（2026-06-15 实测）
+
+> 以下为登录态 WebSocket（op7 鉴权 + protover 2/zlib）实抓样本解析。升级/等级类事件另见 [`API.live_upgrade_events.md`](./API.live_upgrade_events.md)。
+
+### DANMU_MSG.info[] 数组结构
+
+`DANMU_MSG.info` 是数组（非对象），实测长度 18，关键索引：
+
+| 索引 | 类型 | 说明 |
+| --- | --- | --- |
+| `info[0]` | array | 弹幕元信息。`[0][3]`=弹幕颜色(int)，`[0][4]`=时间戳(ms)，`[0][9]`=弹幕类型，`[0][11]`=渐变色 |
+| `info[1]` | string | **弹幕文本内容** |
+| `info[2]` | array | 发送者：`[uid, uname, 是否房管, 是否VIP, 是否年费VIP, 等级rank, 1, name_color]` |
+| `info[3]` | array | 粉丝勋章（空则 `[]`）：`[等级, 勋章名, 主播名, 主播房间号, 颜色, 特别标识, ..., guard_level, ...]` |
+| `info[4]` | array | 用户等级：`[UL等级, 0, 等级颜色, 等级排名(">50000"等), ...]` |
+| `info[5]` | array | 头衔：`[老爷头衔, 头衔图标]` |
+| `info[7]` | int | 用户身份/守护等级 |
+| `info[9]` | object | `{ct, ts}` 校验与时间戳 |
+| `info[15]` | object/int | 扩展信息（含 `extra` JSON 串、`user` 信息） |
+
+> 数组位含义随版本微调，消费端应做长度与类型保护，不要硬编码深层索引。
+
+### SEND_GIFT.data 关键字段
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `giftName` / `giftId` | string / int | 礼物名 / ID |
+| `num` | int | 数量 |
+| `price` | int | 单价（瓜子） |
+| `coin_type` | string | `gold`=金瓜子（付费），`silver`=银瓜子（免费） |
+| `total_coin` | int | 总价 = price × num |
+| `uid` / `uname` | int / string | 送礼用户 |
+| `action` | string | 动作文案，常为 `投喂` |
+| `wealth_level` | int | 送礼用户荣耀（财富）等级 |
+| `guard_level` | int | 大航海等级 |
+| `medal_info` | object | 粉丝勋章信息（`medal_level`/`guard_level`/`anchor_uname` 等） |
+| `sender_uinfo` | object | 发送者完整 uinfo（base/medal/wealth/guard） |
+| `combo_send` / `batch_combo_send` | object | 连击信息 |
+| `blind_gift` | object/null | 盲盒礼物信息 |
+
+### 其他高频事件
+
+| CMD | data 结构（实测） |
+| --- | --- |
+| `WATCHED_CHANGE` | `{num, text_small, text_large}`，如 `1477人看过` |
+| `ONLINE_RANK_COUNT` | `{count, count_text, online_count, online_count_text}` 高能榜人数 |
+| `ONLINE_RANK_V3` | `data.pb` 为 **protobuf 编码**（base64），顶层 field1=`"online_rank"`，field3=榜单条目子结构 |
+| `DM_INTERACTION` | `data.data` 为 JSON 字符串，含 `{cnt, suffix_text:"人正在点赞", display_flag}` 等聚合互动；`type` 区分子类型（106=点赞聚合） |
+| `PK_INFO` | `{members[], pk_basic, pk_play, pk_match_info, timestamp}`，`members[]` 含双方主播 `golds`/`face`/`is_winner` |
+| `UNIVERSAL_EVENT_GIFT_V2` | 连麦/多人互动事件，含 `interact_template`（布局 `layout_id`）、`members[]` |
+| `TRADING_SCORE` | 带货/交易积分事件（电商区） |
+
 ## 备注
 
-- 协议版本 3（brotli 压缩）是当前 Web 端默认，需解压后按包头递归解析。
-- `DANMU_MSG` 的 `info` 字段是数组格式（非对象），结构复杂。
+- 协议版本 3（brotli 压缩）是当前 Web 端默认，需解压后按包头递归解析。无 brotli 环境可在鉴权包改用 protover 2 走 zlib。
+- `DANMU_MSG` 的 `info` 字段是数组格式（非对象），结构见上节。
 - `SEND_GIFT` 中 `coin_type` 区分金瓜子(gold)和银瓜子(silver)礼物。
+- `INTERACT_WORD_V2`、`ONLINE_RANK_V3` 等新版事件已 **protobuf 编码**，明文 JSON 解析会失败。
 - 同一个事件可能同时推送多种 CMD（如上舰同时推送 `GUARD_BUY` + `USER_TOAST_MSG` + `NOTICE_MSG`）。
+- 匿名连接（uid=0）实测被风控拒绝，需带登录态 `uid` + `buvid3`。
